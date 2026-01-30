@@ -11,9 +11,6 @@ export default function Projects() {
     return ["All", ...Array.from(s).sort()];
   }, []);
 
-  setCat
-  categories
-
   const filtered = useMemo(() => {
     const query = q.toLowerCase().trim();
     return projects.filter((p) => {
@@ -38,7 +35,17 @@ export default function Projects() {
             placeholder="Search (MATLAB, DFM, pneumatics...)"
             className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 outline-none"
           />
-          
+          <select
+            value={cat}
+            onChange={(e) => setCat(e.target.value)}
+            className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 outline-none"
+          >
+            {categories.map((c) => (
+              <option key={c} value={c} className="bg-black">
+                {c}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
 

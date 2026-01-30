@@ -1,6 +1,5 @@
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
-import { projects } from "../data/projects";
 import CursorGlow from "../components/CursorGlow";
 import ScrollProgress from "../components/ScrollProgress";
 import HeroScene from "../components/HeroScene";
@@ -18,17 +17,8 @@ const fadeUp = {
   })
 };
 
-function cx(...c: (string | false | null | undefined)[]) {
-  return c.filter(Boolean).join(" ");
-}
-cx
+
 export default function Home() {
-  const featuredIds = ["quantum", "f35", "me2110", "fire-tornado", "autospotter", "carbon-nano"];
-  const featured = projects
-  featured
-    .filter(p => featuredIds.includes(p.id))
-    .sort((a, b) => featuredIds.indexOf(a.id) - featuredIds.indexOf(b.id))
-    .slice(0, 6);
 
   // You can tune these numbers to match your story (or keep them aspirational but reasonable)
   const stats = [

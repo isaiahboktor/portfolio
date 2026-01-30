@@ -6,11 +6,12 @@ import * as THREE from "three";
 function Orb() {
   const ref = useRef<THREE.Mesh>(null);
 
-  useFrame((state, delta) => {
-    if (!ref.current) return;
-    ref.current.rotation.y += delta * 0.18;
-    ref.current.rotation.x += delta * 0.08;
+  useFrame((_state, delta) => {
+  if (!ref.current) return;
+  ref.current.rotation.y += delta * 0.18;
+  ref.current.rotation.x += delta * 0.08;
   });
+
 
   return (
     <mesh ref={ref} position={[0.7, 0.05, 0]}>
