@@ -21,10 +21,11 @@ const fadeUp = {
 function cx(...c: (string | false | null | undefined)[]) {
   return c.filter(Boolean).join(" ");
 }
-
+cx
 export default function Home() {
   const featuredIds = ["quantum", "f35", "me2110", "fire-tornado", "autospotter", "carbon-nano"];
   const featured = projects
+  featured
     .filter(p => featuredIds.includes(p.id))
     .sort((a, b) => featuredIds.indexOf(a.id) - featuredIds.indexOf(b.id))
     .slice(0, 6);

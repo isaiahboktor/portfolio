@@ -11,6 +11,9 @@ export default function Projects() {
     return ["All", ...Array.from(s).sort()];
   }, []);
 
+  setCat
+  categories
+
   const filtered = useMemo(() => {
     const query = q.toLowerCase().trim();
     return projects.filter((p) => {
