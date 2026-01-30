@@ -9,8 +9,6 @@ type Props = {
   height?: number; // px
 };
 
-const targetVec = useMemo(() => new THREE.Vector3(0, 0, 0), []);
-
 // Must match export
 const N = 50;
 const PER_SLICE = N * N; // 2500
@@ -478,7 +476,7 @@ export default function QuantumViewer({ framesPath, frameCount, height = 800 }: 
           ) : null}
 
           <OrbitControls
-            target={targetVec}
+            target={[0,0,0] as any}
             enableDamping
             dampingFactor={0.08}
             rotateSpeed={0.7}
