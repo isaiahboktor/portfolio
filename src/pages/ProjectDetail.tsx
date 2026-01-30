@@ -22,10 +22,10 @@ export default function ProjectDetail() {
   }
 
   const hasModel = Boolean(p.modelGlb);
+  const hasQuantum = Boolean(p.quantum);
+  const hasInteractive = hasQuantum || hasModel;
   const hasImages = Boolean(p.images && p.images.length > 0);
   const hasVideo = Boolean(p.video);
-  const hasIframe = Boolean(p.iframe);
-  const hasInteractive = hasModel || hasIframe;
 
   const GalleryCard = hasImages ? <ImageGallery images={p.images!} /> : null;
 
@@ -63,21 +63,26 @@ export default function ProjectDetail() {
 
 
 
-const InteractiveHero = hasInteractive ? (
-  <div className="mt-8 rounded-2xl border border-white/5 bg-white/5 shadow-glow p-4">
-    <div className="font-display text-lg tracking-tight">
-      {hasIframe ? "Interactive Model" : "3D Model"}
-    </div>
+  const InteractiveHero = hasInteractive ? (
+    <div className="mt-8 rounded-2xl border border-white/5 bg-white/5 shadow-glow p-4">
+      <div className="font-display text-lg tracking-tight">
+        {hasQuantum ? "Interactive Simulation" : "3D Model"}
+      </div>
 
-    <div className="mt-3 overflow-hidden rounded-2xl border border-white/5 bg-black/30">
-      {hasIframe ? (
-        <QuantumViewer src={p.iframe!.src} height={p.iframe!.height ?? 800} />
-      ) : hasModel ? (
-        <ThreeModel url={p.modelGlb!} />
-      ) : null}
+      <div className="mt-3 overflow-hidden rounded-2xl border border-white/5 bg-black/30">
+        {hasQuantum ? (
+          <QuantumViewer
+            framesPath={p.quantum!.framesPath}
+            frameCount={p.quantum!.frameCount}
+            height={p.quantum!.height ?? 800}
+          />
+        ) : hasModel ? (
+          <ThreeModel url={p.modelGlb!} />
+        ) : null}
+      </div>
     </div>
-  </div>
-) : null;
+  ) : null;
+
 
 
   // --- Smart two-column fill logic ---

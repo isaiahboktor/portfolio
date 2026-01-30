@@ -9,7 +9,12 @@ export type Project = {
   images?: { src: string; alt: string }[];
   modelGlb?: string; // /models/model.glb
   video?: { type: "file" | "youtube"; src: string };
-  iframe?: { src: string; height?: number };
+  quantum?: {
+  framesPath: string;   // e.g. "/quantum/tdse_default_f32.bin"
+  frameCount: number;   // e.g. 600
+  height?: number;      // optional iframe-like height for the viewer
+};
+
   highlights: string[];
 };
 
@@ -23,10 +28,8 @@ export const projects: Project[] = [
       "Interactive 3D wavepacket visualization exported from MATLAB and rendered in WebGL with frame scrubbing and threshold control.",
     tags: ["MATLAB", "Numerics", "3D Visualization", "Quantum"],
     pdf: "/pdfs/Quantum.pdf",
-    iframe: {
-      src: "https://marcus-unburned-unthroatily.ngrok-free.dev/webapps/home/session.html?app=TDSEWebApp%2FTDSEWebApp",
-      height: 800
-    },
+    quantum: { framesPath: "/quantum/tdse_default_f32.bin", frameCount: 600 },
+
     highlights: [
   "Implemented a time-accurate Schrödinger solver with Δt = 0.01 and validated behavior across multiple barrier geometries to quantify reflection/transmission response.",
   "Ran controlled case studies (e.g., barrier inputs (6.3, 5.3, 5.5) and (1.5, 10, 1.5)) and reported R/T outcomes (e.g., R = 0.224, T = 0.920; R = 0.031, T = 0.969) to ground the visuals in real physics, not just graphics.",
