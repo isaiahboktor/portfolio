@@ -24,7 +24,7 @@ export const projects: Project[] = [
     tags: ["MATLAB", "Numerics", "3D Visualization", "Quantum"],
     pdf: "/pdfs/Quantum.pdf",
     iframe: {
-      src: "https://marcus-unburned-unthroatily.ngrok-free.dev",
+      src: "https://marcus-unburned-unthroatily.ngrok-free.dev/webapps/home/session.html?app=TDSEWebApp%2FTDSEWebApp",
       height: 800
     },
     highlights: [
@@ -101,7 +101,10 @@ export const projects: Project[] = [
       { src: "/images/projects/fire-tornado/2.jpg", alt: "Fire Tornado experiment" },
       { src: "/images/projects/fire-tornado/3.jpg", alt: "Fire Tornado results/presentation" }
     ],
-    video: { type: "file", src: "/videos/fire-tornado.mp4" },
+    video: {
+      type: "youtube",
+      src: "https://www.youtube.com/embed/8Sl1E3ttnQk?rel=0&modestbranding=1"
+          },
     highlights: [
   "Designed an adjustable enclosure study to map gap-space offset to flame height, sweeping offsets across [5, 10, 15, 20, 25] cm for a clean parameter study.",
   "Used tracker video analysis for repeatable flame-height measurement (no eyeballing), enabling consistent comparisons across trials.",
