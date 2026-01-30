@@ -481,7 +481,7 @@ export default function QuantumViewer({ framesPath, frameCount, height = 800 }: 
             dampingFactor={0.08}
             rotateSpeed={0.7}
             minDistance={6}
-            maxDistance={18}
+            maxDistance={100}
             // prevent going "under" the plane (Z-up version)
             minPolarAngle={0.08}
             maxPolarAngle={Math.PI / 2 - 0.08}
