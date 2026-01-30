@@ -4,15 +4,15 @@ import { Canvas } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 
 type Props = {
-  framesPath: string;   // points to tdse_default_f32.bin
-  frameCount: number;   // e.g., 600
-  height?: number;      // px
+  framesPath: string;
+  frameCount: number;
+  height?: number; // px
 };
 
-const N = 50; // Nx=Ny=Nz=50 in your MATLAB export
+// Must match export
+const N = 50;
 const PER_SLICE = N * N; // 2500
-const SLICES_PER_FRAME = 6;
-const FLOATS_PER_FRAME = PER_SLICE * SLICES_PER_FRAME;
+const FLOATS_PER_FRAME = PER_SLICE * 6;
 
 function linspace(a: number, b: number, n: number) {
   const out = new Float32Array(n);
@@ -21,18 +21,20 @@ function linspace(a: number, b: number, n: number) {
   return out;
 }
 
-// quick "hot-ish" colormap approximation
+/**
+ * MATLAB-like hot colormap, but we’ll apply gamma externally.
+ */
 function hotColor(t: number) {
   const x = Math.max(0, Math.min(1, t));
   const r = Math.min(1, 3 * x);
   const g = Math.min(1, Math.max(0, 3 * x - 1));
   const b = Math.min(1, Math.max(0, 3 * x - 2));
-  return [r, g, b];
+  return [r, g, b] as const;
 }
 
 /**
- * Builds a grid geometry where vertices are ordered in MATLAB column-major:
- * for c in [0..cols-1], for r in [0..rows-1].
+ * Builds a grid geometry where vertex order matches MATLAB column-major flattening:
+ * for c: 0..cols-1, for r: 0..rows-1  => i = c*rows + r
  */
 function buildGridGeometry(
   rows: number,
@@ -50,16 +52,13 @@ function buildGridGeometry(
       positions[k * 3 + 0] = x;
       positions[k * 3 + 1] = y;
       positions[k * 3 + 2] = 0;
-
       colors[k * 3 + 0] = 0;
       colors[k * 3 + 1] = 0;
       colors[k * 3 + 2] = 0;
-
       k++;
     }
   }
 
-  // indices (two triangles per cell), matching same (r,c) layout
   const indices: number[] = [];
   const idx = (r: number, c: number) => c * rows + r;
 
@@ -69,7 +68,6 @@ function buildGridGeometry(
       const b = idx(r + 1, c);
       const d = idx(r, c + 1);
       const e = idx(r + 1, c + 1);
-
       indices.push(a, b, d);
       indices.push(b, e, d);
     }
@@ -83,69 +81,95 @@ function buildGridGeometry(
   return geo;
 }
 
+type DisplayMode = "physical" | "enhanced";
+
 function SliceSurfaces({
   data,
   frame,
   threshold,
-  heightScale
+  heightScale,
+  gamma,
+  mode,
+  ghostOpacity,
 }: {
   data: Float32Array;
   frame: number;
   threshold: number;
-  heightScale: number;
+  heightScale: number; // scene units per density unit (linear)
+  gamma: number; // color gamma
+  mode: DisplayMode;
+  ghostOpacity: number;
 }) {
+  // Must match export bounds (you used [-5..5] in TDSE.m)
   const x = useMemo(() => linspace(-5, 5, N), []);
   const y = useMemo(() => linspace(-5, 5, N), []);
   const z = useMemo(() => linspace(-5, 5, N), []);
 
-  // three slice grids, same sizes in this dataset (50x50)
-  const geoX = useMemo(
-    () => buildGridGeometry(N, N, (r, c) => [y[c], z[r]]), // (Y,Z) -> (x,y)
-    [y, z]
-  );
-  const geoY = useMemo(
-    () => buildGridGeometry(N, N, (r, c) => [x[c], z[r]]), // (X,Z)
-    [x, z]
-  );
-  const geoZ = useMemo(
-    () => buildGridGeometry(N, N, (r, c) => [x[c], y[r]]), // (X,Y)
-    [x, y]
-  );
+  // Geometries match MATLAB surf domains:
+  // Xslice: surf(Y,Z, dens(xSlice,:,:))  -> domain (Y,Z)
+  // Yslice: surf(X,Z, dens(:,ySlice,:))  -> domain (X,Z)
+  // Zslice: surf(X,Y, dens(:,:,zSlice))  -> domain (X,Y)
+  const geoX = useMemo(() => buildGridGeometry(N, N, (r, c) => [y[c], z[r]]), [y, z]);
+  const geoY = useMemo(() => buildGridGeometry(N, N, (r, c) => [x[c], z[r]]), [x, z]);
+  const geoZ = useMemo(() => buildGridGeometry(N, N, (r, c) => [x[c], y[r]]), [x, y]);
 
   const refX = useRef<THREE.BufferGeometry>(null);
   const refY = useRef<THREE.BufferGeometry>(null);
   const refZ = useRef<THREE.BufferGeometry>(null);
+
   const refGX = useRef<THREE.BufferGeometry>(null);
   const refGY = useRef<THREE.BufferGeometry>(null);
   const refGZ = useRef<THREE.BufferGeometry>(null);
 
   const frameOffset = frame * FLOATS_PER_FRAME;
 
-  // Update function: write Z (height) + colors
+  /**
+   * Stable normalization: normalize colors per-FRAME per-SLICE (like MATLAB autoscale),
+   * but keep it smooth using a small epsilon and optional enhanced display mapping.
+   * Physical mode: height = vv * heightScale
+   * Enhanced mode: height = log10(vv/threshold+1) * heightScaleEnhanced
+   */
   function applyToGeometry(
     geo: THREE.BufferGeometry,
     sliceOffsetFloats: number,
-    useHot: boolean,
-    zEps: number
+    paintHot: boolean,
+    zEps: number,
+    enhancedHeightBoost: number
   ) {
     const pos = geo.getAttribute("position") as THREE.BufferAttribute;
     const col = geo.getAttribute("color") as THREE.BufferAttribute;
 
-    // compute max for colormap normalization (per slice, per frame)
+    // Find max (for color normalization)
     let maxV = 1e-12;
     for (let i = 0; i < PER_SLICE; i++) {
       const v = data[frameOffset + sliceOffsetFloats + i];
       if (v > maxV) maxV = v;
     }
 
+    const eps = 1e-12;
     for (let i = 0; i < PER_SLICE; i++) {
       const v = data[frameOffset + sliceOffsetFloats + i];
       const vv = v >= threshold ? v : 0;
 
-      pos.setZ(i, vv * heightScale + zEps);
+      // Height mapping
+      let h = 0;
+      if (mode === "physical") {
+        // physically faithful visualization: height ∝ |psi|^2
+        h = vv * heightScale;
+      } else {
+        // enhanced visibility: log mapping relative to threshold (does not change the data, only display)
+        // log10(1 + vv/threshold) gives nice shape without blowing up peaks
+        const t = threshold > 0 ? vv / threshold : vv / (maxV + eps);
+        h = Math.log10(1 + t) * enhancedHeightBoost;
+      }
 
-      if (useHot) {
-        const t = vv / maxV;
+      pos.setZ(i, h + zEps);
+
+      // Color mapping
+      if (paintHot) {
+        // Normalize + gamma to lift low-intensity structure
+        const tRaw = vv / maxV;
+        const t = Math.pow(tRaw, gamma);
         const [r, g, b] = hotColor(t);
         col.setXYZ(i, r, g, b);
       }
@@ -160,55 +184,82 @@ function SliceSurfaces({
     if (!refX.current || !refY.current || !refZ.current) return;
     if (!refGX.current || !refGY.current || !refGZ.current) return;
 
-    // main slices: hot colormap
-    applyToGeometry(refX.current, 0 * PER_SLICE, true, 0.0);
-    applyToGeometry(refY.current, 1 * PER_SLICE, true, 0.0);
-    applyToGeometry(refZ.current, 2 * PER_SLICE, true, 0.0);
+    // Enhanced height boost is in "scene units" (since log is unitless)
+    const enhancedBoost = Math.max(0.001, heightScale * 0.08);
 
-    // ghost: cyan overlay, no hot colormap (just height)
-    applyToGeometry(refGX.current, 3 * PER_SLICE, false, 0.0005);
-    applyToGeometry(refGY.current, 4 * PER_SLICE, false, 0.0005);
-    applyToGeometry(refGZ.current, 5 * PER_SLICE, false, 0.0005);
-  }, [data, frame, threshold, heightScale]);
+    // Main slices (hot)
+    applyToGeometry(refX.current, 0 * PER_SLICE, true, 0.0, enhancedBoost);
+    applyToGeometry(refY.current, 1 * PER_SLICE, true, 0.0, enhancedBoost);
+    applyToGeometry(refZ.current, 2 * PER_SLICE, true, 0.0, enhancedBoost);
+
+    // Ghost overlays (cyan, height only)
+    applyToGeometry(refGX.current, 3 * PER_SLICE, false, 0.0008, enhancedBoost);
+    applyToGeometry(refGY.current, 4 * PER_SLICE, false, 0.0008, enhancedBoost);
+    applyToGeometry(refGZ.current, 5 * PER_SLICE, false, 0.0008, enhancedBoost);
+  }, [data, frame, threshold, heightScale, gamma, mode]);
 
   return (
     <group>
-      {/* Ground plane (cyan like MATLAB screenshot) */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, -0.001]}>
+      {/* Ground plane (cyan slab like your MATLAB view) */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, -0.002]}>
         <planeGeometry args={[12, 12, 1, 1]} />
-        <meshStandardMaterial color="#00ffff" transparent opacity={0.25} />
+        <meshStandardMaterial color="#00ffff" transparent opacity={0.18} />
       </mesh>
 
       {/* Main slices */}
       <mesh geometry={geoX}>
         <primitive object={geoX} ref={refX as any} />
-        <meshStandardMaterial vertexColors transparent opacity={0.85} />
+        <meshStandardMaterial vertexColors transparent opacity={0.92} roughness={0.35} metalness={0.05} />
       </mesh>
 
       <mesh geometry={geoY}>
         <primitive object={geoY} ref={refY as any} />
-        <meshStandardMaterial vertexColors transparent opacity={0.85} />
+        <meshStandardMaterial vertexColors transparent opacity={0.92} roughness={0.35} metalness={0.05} />
       </mesh>
 
       <mesh geometry={geoZ}>
         <primitive object={geoZ} ref={refZ as any} />
-        <meshStandardMaterial vertexColors transparent opacity={0.85} />
+        <meshStandardMaterial vertexColors transparent opacity={0.92} roughness={0.35} metalness={0.05} />
       </mesh>
 
-      {/* Ghost overlays */}
+      {/* Ghost overlays: emissive cyan for “tunneling ghost” feel */}
       <mesh geometry={geoX}>
         <primitive object={geoX.clone()} ref={refGX as any} />
-        <meshStandardMaterial color="#00ffff" transparent opacity={0.35} />
+        <meshStandardMaterial
+          color="#00ffff"
+          emissive="#00ffff"
+          emissiveIntensity={1.0}
+          transparent
+          opacity={ghostOpacity}
+          depthWrite={false}
+          blending={THREE.AdditiveBlending}
+        />
       </mesh>
 
       <mesh geometry={geoY}>
         <primitive object={geoY.clone()} ref={refGY as any} />
-        <meshStandardMaterial color="#00ffff" transparent opacity={0.35} />
+        <meshStandardMaterial
+          color="#00ffff"
+          emissive="#00ffff"
+          emissiveIntensity={1.0}
+          transparent
+          opacity={ghostOpacity}
+          depthWrite={false}
+          blending={THREE.AdditiveBlending}
+        />
       </mesh>
 
       <mesh geometry={geoZ}>
         <primitive object={geoZ.clone()} ref={refGZ as any} />
-        <meshStandardMaterial color="#00ffff" transparent opacity={0.35} />
+        <meshStandardMaterial
+          color="#00ffff"
+          emissive="#00ffff"
+          emissiveIntensity={1.0}
+          transparent
+          opacity={ghostOpacity}
+          depthWrite={false}
+          blending={THREE.AdditiveBlending}
+        />
       </mesh>
     </group>
   );
@@ -216,13 +267,22 @@ function SliceSurfaces({
 
 export default function QuantumViewer({ framesPath, frameCount, height = 800 }: Props) {
   const [buf, setBuf] = useState<Float32Array | null>(null);
+
   const [frame, setFrame] = useState(0);
   const [playing, setPlaying] = useState(false);
-  const [threshold, setThreshold] = useState(0);
-  const [heightScale, setHeightScale] = useState(900); // tune to match your MATLAB visual scale
+
+  // Good defaults for your screenshot scale (~1e-3 peaks)
+  const [threshold, setThreshold] = useState(3e-5);
+  const [heightScale, setHeightScale] = useState(8000); // MUST allow >2000
+  const [gamma, setGamma] = useState(0.35);
+
+  const [ghostOpacity, setGhostOpacity] = useState(0.7);
+  const [mode, setMode] = useState<DisplayMode>("physical");
+  const [fps, setFps] = useState(30);
 
   useEffect(() => {
     let cancelled = false;
+
     (async () => {
       const res = await fetch(framesPath, { cache: "force-cache" });
       if (!res.ok) throw new Error(`Failed to fetch dataset: ${res.status}`);
@@ -231,12 +291,11 @@ export default function QuantumViewer({ framesPath, frameCount, height = 800 }: 
 
       const f32 = new Float32Array(ab);
 
-      // sanity: dataset should contain frameCount frames
+      // sanity
       const expected = frameCount * FLOATS_PER_FRAME;
       if (f32.length < expected) {
         console.warn("Dataset shorter than expected.", { got: f32.length, expected });
       }
-
       setBuf(f32);
     })().catch((e) => {
       console.error(e);
@@ -248,14 +307,14 @@ export default function QuantumViewer({ framesPath, frameCount, height = 800 }: 
     };
   }, [framesPath, frameCount]);
 
-  // simple play loop
   useEffect(() => {
     if (!playing) return;
+    const ms = Math.max(10, Math.round(1000 / fps));
     const id = window.setInterval(() => {
       setFrame((f) => (f + 1) % frameCount);
-    }, 60);
+    }, ms);
     return () => window.clearInterval(id);
-  }, [playing, frameCount]);
+  }, [playing, frameCount, fps]);
 
   return (
     <div className="w-full">
@@ -268,8 +327,40 @@ export default function QuantumViewer({ framesPath, frameCount, height = 800 }: 
           {playing ? "Pause" : "Play"}
         </button>
 
+        <button
+          onClick={() => setFrame(0)}
+          className="px-3 py-1.5 rounded-xl bg-white/5 border border-white/10"
+        >
+          Reset
+        </button>
+
         <div className="text-sm text-zinc-300">
           Frame {frame + 1} / {frameCount}
+        </div>
+
+        <div className="flex items-center gap-2 text-sm text-zinc-300">
+          Mode
+          <select
+            value={mode}
+            onChange={(e) => setMode(e.target.value as DisplayMode)}
+            className="px-2 py-1 rounded-lg bg-white/5 border border-white/10"
+          >
+            <option value="physical">Physical</option>
+            <option value="enhanced">Enhanced</option>
+          </select>
+        </div>
+
+        <div className="flex items-center gap-2 text-sm text-zinc-300">
+          FPS
+          <input
+            type="range"
+            min={10}
+            max={60}
+            step={1}
+            value={fps}
+            onChange={(e) => setFps(Number(e.target.value))}
+          />
+          <span className="w-10 text-right">{fps}</span>
         </div>
 
         <input
@@ -280,6 +371,18 @@ export default function QuantumViewer({ framesPath, frameCount, height = 800 }: 
           onChange={(e) => setFrame(Number(e.target.value))}
           className="flex-1 min-w-[240px]"
         />
+
+        <div className="flex items-center gap-2 text-sm text-zinc-300">
+          Gamma
+          <input
+            type="range"
+            min={0.15}
+            max={1.2}
+            step={0.01}
+            value={gamma}
+            onChange={(e) => setGamma(Number(e.target.value))}
+          />
+        </div>
 
         <div className="flex items-center gap-2 text-sm text-zinc-300">
           Threshold
@@ -297,11 +400,23 @@ export default function QuantumViewer({ framesPath, frameCount, height = 800 }: 
           Height
           <input
             type="range"
-            min={200}
-            max={2000}
-            step={10}
+            min={500}
+            max={12000}
+            step={50}
             value={heightScale}
             onChange={(e) => setHeightScale(Number(e.target.value))}
+          />
+        </div>
+
+        <div className="flex items-center gap-2 text-sm text-zinc-300">
+          Ghost
+          <input
+            type="range"
+            min={0}
+            max={0.9}
+            step={0.01}
+            value={ghostOpacity}
+            onChange={(e) => setGhostOpacity(Number(e.target.value))}
           />
         </div>
       </div>
@@ -309,17 +424,47 @@ export default function QuantumViewer({ framesPath, frameCount, height = 800 }: 
       <div className="w-full rounded-2xl overflow-hidden border border-white/5 bg-black/30" style={{ height }}>
         <Canvas
           dpr={[1, 2]}
-          camera={{ position: [8, 6, 8], fov: 42, near: 0.01, far: 500 }}
+          camera={{ position: [8.5, 6.2, 8.5], fov: 42, near: 0.01, far: 500 }}
+          gl={{
+            antialias: true,
+            alpha: true,
+            powerPreference: "high-performance",
+          }}
+          onCreated={({ gl }) => {
+            // Make it look less “flat” / more like MATLAB’s nice shading
+            gl.toneMapping = THREE.ACESFilmicToneMapping;
+            gl.toneMappingExposure = 1.15;
+            gl.outputColorSpace = THREE.SRGBColorSpace;
+          }}
         >
-          <color attach="background" args={["#000000"]} />
-          <ambientLight intensity={0.75} />
-          <directionalLight position={[8, 10, 8]} intensity={1.2} />
+          <color attach="background" args={["#05060a"]} />
+
+          {/* Better depth & shape */}
+          <hemisphereLight intensity={0.55} />
+          <ambientLight intensity={0.22} />
+          <directionalLight position={[10, 14, 10]} intensity={1.35} />
+          <directionalLight position={[-8, 6, -10]} intensity={0.65} />
 
           {buf ? (
-            <SliceSurfaces data={buf} frame={frame} threshold={threshold} heightScale={heightScale} />
+            <SliceSurfaces
+              data={buf}
+              frame={frame}
+              threshold={threshold}
+              heightScale={heightScale}
+              gamma={gamma}
+              mode={mode}
+              ghostOpacity={ghostOpacity}
+            />
           ) : null}
 
-          <OrbitControls enableDamping dampingFactor={0.08} rotateSpeed={0.7} />
+          <OrbitControls
+            enableDamping
+            dampingFactor={0.08}
+            rotateSpeed={0.7}
+            minDistance={6}
+            maxDistance={18}
+            maxPolarAngle={Math.PI * 0.48}
+          />
         </Canvas>
       </div>
     </div>
