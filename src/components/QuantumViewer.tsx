@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { Canvas } from "@react-three/fiber";
+import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 
 type Props = {
@@ -8,6 +8,8 @@ type Props = {
   frameCount: number;
   height?: number; // px
 };
+
+const targetVec = useMemo(() => new THREE.Vector3(0, 0, 0), []);
 
 // Must match export
 const N = 50;
@@ -30,6 +32,18 @@ function hotColor(t: number) {
   const g = Math.min(1, Math.max(0, 3 * x - 1));
   const b = Math.min(1, Math.max(0, 3 * x - 2));
   return [r, g, b] as const;
+}
+
+function ZUp() {
+  const { camera } = useThree();
+
+  useEffect(() => {
+    camera.up.set(0, 0, 1); // Z is up
+    camera.lookAt(0, 0, 0);
+    camera.updateProjectionMatrix();
+  }, [camera]);
+
+  return null;
 }
 
 /**
@@ -201,7 +215,7 @@ function SliceSurfaces({
   return (
     <group>
       {/* Ground plane (cyan slab like your MATLAB view) */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, -0.002]}>
+      <mesh position={[0, 0, -0.002]}>
         <planeGeometry args={[12, 12, 1, 1]} />
         <meshStandardMaterial color="#00ffff" transparent opacity={0.18} />
       </mesh>
@@ -424,19 +438,25 @@ export default function QuantumViewer({ framesPath, frameCount, height = 800 }: 
       <div className="w-full rounded-2xl overflow-hidden border border-white/5 bg-black/30" style={{ height }}>
         <Canvas
           dpr={[1, 2]}
-          camera={{ position: [8.5, 6.2, 8.5], fov: 42, near: 0.01, far: 500 }}
+          // for Z-up: give it a higher Z so you're clearly "above"
+          camera={{ position: [8.5, -8.5, 8.5], fov: 42, near: 0.01, far: 500 }}
           gl={{
             antialias: true,
             alpha: true,
             powerPreference: "high-performance",
           }}
-          onCreated={({ gl }) => {
-            // Make it look less “flat” / more like MATLAB’s nice shading
+          onCreated={({ gl, camera }) => {
             gl.toneMapping = THREE.ACESFilmicToneMapping;
             gl.toneMappingExposure = 1.15;
             gl.outputColorSpace = THREE.SRGBColorSpace;
+
+            // also enforce Z-up here (safe even if ZUp runs)
+            camera.up.set(0, 0, 1);
+            camera.lookAt(0, 0, 0);
           }}
         >
+          <ZUp />
+
           <color attach="background" args={["#05060a"]} />
 
           {/* Better depth & shape */}
@@ -458,12 +478,15 @@ export default function QuantumViewer({ framesPath, frameCount, height = 800 }: 
           ) : null}
 
           <OrbitControls
+            target={targetVec}
             enableDamping
             dampingFactor={0.08}
             rotateSpeed={0.7}
             minDistance={6}
             maxDistance={18}
-            maxPolarAngle={Math.PI * 0.48}
+            // prevent going "under" the plane (Z-up version)
+            minPolarAngle={0.08}
+            maxPolarAngle={Math.PI / 2 - 0.08}
           />
         </Canvas>
       </div>
